@@ -60,6 +60,8 @@ module.exports = (
     host = 'localhost',
     port = 3000,
     modify = null,
+    modifyWebpackOptions = null,
+    modifyWebpackConfig = null,
     modifyBabelOptions = null,
     experimental = {},
     disableStartServer = false,
@@ -67,7 +69,8 @@ module.exports = (
   webpackObject,
   clientOnly = false,
   paths = razzlePaths,
-  plugins = []
+  plugins = [],
+  razzleOptions = {}
 ) => {
   return new Promise(async resolve => {
     // Define some useful shorthands.
@@ -79,9 +82,6 @@ module.exports = (
 
     const shouldUseReactRefresh = experimental.reactRefresh ? true : false;
 
-    // First we check to see if the user has a custom .babelrc file, otherwise
-    // we just use babel-preset-razzle.
-    const hasBabelRc = fs.existsSync(paths.appBabelRc);
     const mainBabelOptions = {
       babelrc: true,
       cacheDirectory: true,
@@ -89,31 +89,38 @@ module.exports = (
       plugins: [],
     };
 
-    if (!hasBabelRc) {
-      mainBabelOptions.presets.push(require.resolve('../babel'));
-      // Make sure we have a unique cache identifier, erring on the
-      // side of caution.
-      // We remove this when the user ejects because the default
-      // is sane and uses Babel options. Instead of options, we use
-      // the razzle-dev-utils and babel-preset-razzle versions.
-      mainBabelOptions.cacheIdentifier = getCacheIdentifier(
-        (IS_PROD ? 'production' : IS_DEV && 'development') +
-          '_' +
-          (IS_NODE ? 'nodebuild' : IS_WEB && 'webbuild'),
-        ['babel-preset-razzle', 'react-dev-utils', 'razzle-dev-utils']
-      );
-      if (IS_DEV && IS_WEB && shouldUseReactRefresh) {
-        mainBabelOptions.plugins.push(require.resolve('react-refresh/babel'));
+    if (!experimental.newBabel) {
+
+      // First we check to see if the user has a custom .babelrc file, otherwise
+      // we just use babel-preset-razzle.
+      const hasBabelRc = fs.existsSync(paths.appBabelRc);
+
+      if (!hasBabelRc) {
+        mainBabelOptions.presets.push(require.resolve('../babel'));
+        // Make sure we have a unique cache identifier, erring on the
+        // side of caution.
+        // We remove this when the user ejects because the default
+        // is sane and uses Babel options. Instead of options, we use
+        // the razzle-dev-utils and babel-preset-razzle versions.
+        mainBabelOptions.cacheIdentifier = getCacheIdentifier(
+          (IS_PROD ? 'production' : IS_DEV && 'development') +
+            '_' +
+            (IS_NODE ? 'nodebuild' : IS_WEB && 'webbuild'),
+          ['babel-preset-razzle', 'react-dev-utils', 'razzle-dev-utils']
+        );
+        if (IS_DEV && IS_WEB && shouldUseReactRefresh) {
+          mainBabelOptions.plugins.push(require.resolve('react-refresh/babel'));
+        }
       }
-    }
 
-    // Allow app to override babel options
-    const babelOptions = modifyBabelOptions
-      ? modifyBabelOptions(mainBabelOptions, { target, dev: IS_DEV })
-      : mainBabelOptions;
+      // Allow app to override babel options
+      const babelOptions = modifyBabelOptions
+        ? modifyBabelOptions(mainBabelOptions, { target, dev: IS_DEV })
+        : mainBabelOptions;
 
-    if (hasBabelRc && babelOptions.babelrc) {
-      console.log('Using .babelrc defined in your app root');
+      if (hasBabelRc && babelOptions.babelrc) {
+        console.log('Using .babelrc defined in your app root');
+      }
     }
 
     const hasStaticExportJs = fs.existsSync(paths.appStaticExportJs + '.js');
@@ -745,10 +752,44 @@ module.exports = (
       ];
     }
 
+    for (const [plugin, pluginOptions] of plugins) {
+      // Check if .modifyWebpackConfig is a function.
+      // If it is, call it on the configs we created.
+      if (plugin.modifyWebpackConfig) {
+        config = await plugin.modifyWebpackConfig(
+          { env: { target, dev: IS_DEV },
+            webpackConfig: config,
+            webpackObject: webpackObject,
+            options: {
+              pluginOptions,
+              razzleOptions,
+              webpackOptions
+            },
+            paths
+          }
+        );
+      }
+    }
+    // Check if razzle.config.js has a modifyWebpackConfig function.
+    // If it does, call it on the configs we created.
+    if (modifyWebpackConfig) {
+      config = await modifyWebpackConfig(
+        { env: { target, dev: IS_DEV },
+          webpackConfig: config,
+          webpackObject: webpackObject,
+          options: {
+            razzleOptions,
+            webpackOptions
+          },
+          paths
+        });
+    }
+
     for (const [plugin, options] of plugins) {
       // Check if plugin is a function.
       // If it is, call it on the configs we created.
       if (typeof plugin === 'function') {
+        console.warn("Function only plugins are deprecated, use .modifyWebpackConfig")
         config = await runPlugin(
           plugin,
           config,
@@ -761,6 +802,7 @@ module.exports = (
     // Check if razzle.config.js has a modify function.
     // If it does, call it on the configs we created.
     if (modify) {
+      console.warn("razzle.modify is deprecated use razzle.modifyWebpackConfig.")
       config = await modify(config, { target, dev: IS_DEV }, webpackObject);
     }
 

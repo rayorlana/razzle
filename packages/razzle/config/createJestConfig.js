@@ -17,7 +17,7 @@ function getSetupTestsFilePath(paths) {
   }
 }
 
-module.exports = (resolve, rootDir, razzle, webpackObject, plugins, paths) => {
+module.exports = (resolve, rootDir, razzle, razzleOptions, webpackObject, plugins, paths) => {
   return new Promise(async resolveConfig => {
     // Use this instead of `paths.testsSetup` to avoid putting
     // an absolute filename into configuration after ejecting.
@@ -91,6 +91,18 @@ module.exports = (resolve, rootDir, razzle, webpackObject, plugins, paths) => {
           delete overrides[key];
         }
       });
+    }
+    for (const [plugin, pluginOptions] of plugins) {
+      // Check if .modifyJestConfig is a function.
+      // If it is, call it on the configs we created.
+      if (plugin.modifyJestConfig) {
+        config = await plugin.modifyJestConfig(
+          config,
+          pluginOptions,
+          razzleOptions,
+          paths
+        );
+      }
     }
     resolveConfig(config);
   });
